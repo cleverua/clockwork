@@ -1,4 +1,12 @@
 #!/usr/bin/env ruby
+#
+# Now it is possible to reload jobs without restarting the script
+# So, you launch it as usually:
+# > bundle exec ./bin/clockwork ./example.rb
+# 
+# and when you need it to reload the jobs you send it an USR1 signal like this:
+# > kill -USR1 `cat ./clockwork.pid`
+#
 
 STDERR.sync = STDOUT.sync = true
 
@@ -7,13 +15,33 @@ require File.expand_path('../../lib/clockwork', __FILE__)
 usage = "clockwork <clock.rb>"
 file = ARGV.shift or abort usage
 
-file = "./#{file}" unless file.match(/^[\/.]/)
+require 'lockfile'
+include Lockfile
 
-require file
-
-trap('INT') do
-  puts "\rExiting"
-  exit
+def reload(file)
+  file = "./#{file}" unless file.match(/^[\/.]/)
+  load file
 end
 
-Clockwork::run
+lock_file = File.expand_path('../../clockwork.pid', __FILE__)
+locked = with_lock_file(lock_file) do
+
+  reload(file)
+
+  trap('INT') do
+    puts "\rExiting"
+    exit
+  end
+
+  trap('USR1') do
+    puts "Reloadind the configuration!"
+    Clockwork.clear!
+    reload(file)
+  end
+
+  Clockwork::run
+end
+
+unless locked
+  abort "Lock file #{lock_file} exists, please remove it manually and re-launch the tool!"
+end
